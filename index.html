@@ -1470,6 +1470,31 @@ function rStats(){
     else{clearInterval(iv);const s=Math.round((Date.now()-st)/1000);S.metrics.manualTimes.push(s);save();rStats()}};
 }
 
+/* Đọc danh sách lớp từ Excel: tìm dòng tiêu đề cột, hỗ trợ cột Họ / Tên tách rời, ô gộp, nhiều trang */
+function readClassSheet(wb){
+  const norm=v=>String(v==null?"":v).normalize("NFC").replace(/\s+/g," ").trim();const low=v=>norm(v).toLowerCase();
+  const isNameHead=c=>/^(họ (và|&) tên|họ tên|ho va ten|ho ten|họ và tên học sinh|tên học sinh)/.test(low(c));
+  let best={list:[]};
+  wb.SheetNames.forEach(sn=>{const ws=wb.Sheets[sn];
+    const ks=Object.keys(ws).filter(k=>k[0]!=="!");if(!ks.length)return;let mr=0,mc=0;ks.forEach(k=>{const d=XLSX.utils.decode_cell(k);if(d.r>mr)mr=d.r;if(d.c>mc)mc=d.c});ws["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:mr,c:mc}});
+    const R=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false,blankrows:true});
+    // dòng tiêu đề = dòng có ô (ngắn) là "Họ và tên"/"Họ"+"Tên" và có ít nhất 2 ô có chữ
+    let h=-1,cN=-1,cF=-1;
+    for(let i=0;i<Math.min(R.length,30)&&h<0;i++){const row=R[i];const filled=row.filter(c=>norm(c)).length;if(filled<2)continue;
+      const jh=row.findIndex(c=>/^họ( và tên đệm| và đệm| tên đệm| đệm| lót| và tên lót)?$/.test(low(c)));const jt=row.findIndex(c=>/^tên$/.test(low(c)));if(jh>=0&&jt>=0){h=i;cN=jh;cF=jt;break}
+      const j=row.findIndex(c=>isNameHead(c)&&norm(c).length<40);if(j>=0){h=i;cN=j;break}}
+    if(h<0)return;
+    const head=R[h].map(low);const col=re=>head.findIndex(c=>re.test(c));
+    const cG=col(/^tổ|^nhóm/),cK=col(/tên gọi|biệt danh/),cP=col(/sđt|điện thoại|phone|số đt/);
+    const data=R.slice(h+1);
+    // ô gộp "Họ và tên" trên 2 cột: cột bên phải không có tiêu đề và chứa tên (1 chữ)
+    if(cF<0&&cN+1<head.length&&!head[cN+1]){const vals=data.map(r=>norm(r[cN+1])).filter(Boolean);if(vals.length&&vals.filter(v=>!/\d/.test(v)&&v.split(" ").length<=2).length/vals.length>.7)cF=cN+1}
+    const list=[];
+    data.forEach(row=>{let n=norm(row[cN]);if(cF>=0&&norm(row[cF]))n=(n+" "+norm(row[cF])).trim();if(!n||/^\d+([.,]\d+)?$/.test(n)||isNameHead(n))return;
+      if(/^(tổng|cộng|danh sách|giáo viên|gvcn|người lập)/i.test(n))return;
+      list.push({n,g:cG>=0?norm(row[cG]).replace(/^tổ\s*/i,""):"",k:cK>=0?norm(row[cK]):"",p:cP>=0?norm(row[cP]):""})});
+    if(list.length>best.list.length)best={list,sheet:wb.SheetNames.length>1?sn:""}});
+  return best}
 /* ================= CÀI ĐẶT ================= */
 function rSetup(){
   P("setup").innerHTML=`<div class="card"><h2>Thông tin lớp</h2>
@@ -1499,16 +1524,13 @@ ${CONFIG.pro?`   <div class="card"><h2>Khóa sổ bằng mã PIN</h2><p class="s
    <details><summary>Khôi phục từ bản sao lưu</summary><div style="display:grid;gap:8px;margin-top:8px"><textarea id="seR" rows="3" placeholder="Dán bản sao lưu vào đây"></textarea><div class="row"><input type="file" id="seRF" accept=".json,application/json"><button class="btn" id="seRB">Khôi phục</button></div></div></details>
    <div class="row"><button class="btn danger" id="seX">Xóa toàn bộ dữ liệu</button><span class="small" id="seXM"></span></div><span class="small muted" id="seBM"></span></div>
    <p class="small muted">${esc(CONFIG.title)} · phiên bản ${CONFIG.version}</p>`;
-  $("#seTpl").onclick=()=>{const rows=[["DANH SÁCH LỚP – điền từ dòng 4, mỗi dòng một học sinh. Chỉ bắt buộc cột Họ và tên."],[],["STT","Họ và tên","Tổ","Tên gọi (không bắt buộc)","SĐT phụ huynh (không bắt buộc)"],[1,"Nguyễn Văn An",1,"An",""],[2,"Trần Thị Bình",1,"",""],[3,"Lê Minh Châu",2,"",""]];
+  $("#seTpl").onclick=()=>{const rows=[["DANH SÁCH LỚP (điền từ dòng 4, mỗi dòng một học sinh; chỉ bắt buộc cột thứ hai)"],[],["STT","Họ và tên","Tổ","Tên gọi (không bắt buộc)","SĐT phụ huynh (không bắt buộc)"],[1,"Nguyễn Văn An",1,"An",""],[2,"Trần Thị Bình",1,"",""],[3,"Lê Minh Châu",2,"",""]];
     if(!window.XLSX){$("#seXM").textContent="Cần có mạng để tạo file Excel.";return}exportXLSX("Danh-sach-lop-mau",rows,[6,30,8,22,22],"Danh sach");$("#seXM").textContent="Đã tải file mẫu. Xóa 3 dòng ví dụ và điền danh sách lớp của cô."};
   $("#seXls").onchange=e=>{const f=e.target.files[0];if(!f)return;if(!window.XLSX){$("#seXM").textContent="Cần có mạng để đọc file Excel.";return}
-    const r=new FileReader();r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});const ws=wb.Sheets[wb.SheetNames[0]];const R=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false});
-      let h=R.findIndex(row=>row.some(c=>/h[ọo]\s*(và)?\s*t[êe]n/i.test(String(c))));const head=h>=0?R[h].map(c=>String(c).toLowerCase()):[];
-      const col=re=>head.findIndex(c=>re.test(c));let cN=col(/h[ọo]\s*(và)?\s*t[êe]n/),cG=col(/^t[ổo]\b|^tổ/),cK=col(/tên gọi|biệt danh/),cP=col(/sđt|điện thoại|phone/);
-      if(cN<0){cN=R[0]&&R[0].length>1&&/^\d+$/.test(String(R[0][0]))?1:0}
-      const list=R.slice(h+1).map(row=>({n:String(row[cN]||"").trim(),g:cG>=0?String(row[cG]||"").trim():"",k:cK>=0?String(row[cK]||"").trim():"",p:cP>=0?String(row[cP]||"").trim():""})).filter(x=>x.n&&!/^\d+$/.test(x.n));
-      if(!list.length){$("#seXM").textContent="Không thấy tên học sinh trong file. Cô kiểm tra cột “Họ và tên”.";return}
-      $("#seL").value=list.map(x=>[x.n,x.g||"1",x.k,x.p].join(" | ").replace(/(\s\|\s)+$/,"")).join("\n");$("#seXM").innerHTML='<span class="pos">Đã đọc '+list.length+' học sinh. Cô xem lại rồi bấm “Lưu lớp”.</span>'}
+    const r=new FileReader();r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});const res=readClassSheet(wb);
+      if(!res.list.length){$("#seXM").textContent="Không thấy tên học sinh trong file. Cô kiểm tra file có cột “Họ và tên”.";return}
+      $("#seL").value=res.list.map(x=>[x.n,x.g||"1",x.k,x.p].join(" | ").replace(/(\s\|\s)+$/,"")).join("\n");
+      $("#seXM").innerHTML='<span class="pos">Đã đọc <b>'+res.list.length+' học sinh</b>'+(res.sheet?' từ trang “'+esc(res.sheet)+'”':"")+'. Cô xem lại rồi bấm “Lưu lớp”.</span>'}
       catch(err){$("#seXM").textContent="Không đọc được file: "+err.message}};r.readAsArrayBuffer(f);e.target.value=""};
   $("#seSave").onclick=()=>{
     const rows=$("#seL").value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(l=>{let p=(l.includes("|")?l.split("|"):l.split("\t")).map(x=>x.trim());
