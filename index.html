@@ -989,30 +989,43 @@ Trả về JSON: {"items":[{"code":"HS01","pham_chat":"...","nang_luc":"..."}]}`
 }
 
 /* ================= LỊCH BÁO GIẢNG & KẾ HOẠCH HỌC TẬP ================= */
-const SUBJ_NAME={"TIẾNG VIỆT":"Tiếng Việt","TOÁN":"Toán","TNXH":"Tự nhiên và Xã hội","ĐẠO ĐỨC":"Đạo đức","TIẾNG ANH":"Tiếng Anh","HĐTN":"Hoạt động trải nghiệm","GDTC":"Giáo dục thể chất","MĨ THUẬT":"Mĩ thuật","ÂM NHẠC":"Âm nhạc","TIN HỌC":"Tin học","KHOA HỌC":"Khoa học","LỊCH SỬ VÀ ĐỊA LÍ":"Lịch sử và Địa lí","LS-ĐL":"Lịch sử và Địa lí","LS&ĐL":"Lịch sử và Địa lí","CÔNG NGHỆ":"Công nghệ","TH CHD":"Tăng cường","ĐS THƯ VIỆN":"Đọc sách thư viện"};
+const SUBJ_NAME={"TIẾNG VIỆT":"Tiếng Việt","TOÁN":"Toán","TNXH":"Tự nhiên và Xã hội","ĐẠO ĐỨC":"Đạo đức","TIẾNG ANH":"Tiếng Anh","HĐTN":"Hoạt động trải nghiệm","GDTC":"Giáo dục thể chất","MĨ THUẬT":"Mĩ thuật","ÂM NHẠC":"Âm nhạc","TIN HỌC":"Tin học","KHOA HỌC":"Khoa học","LỊCH SỬ VÀ ĐỊA LÍ":"Lịch sử và Địa lí","LS-ĐL":"Lịch sử và Địa lí","LS&ĐL":"Lịch sử và Địa lí","TN&XH":"Tự nhiên và Xã hội","TN & XH":"Tự nhiên và Xã hội","TC ÂN/MT":"Tăng cường Âm nhạc/Mĩ thuật","TC GDTC":"Tăng cường Giáo dục thể chất","TỰ HỌC CÓ HD":"Tự học có hướng dẫn","TC TIẾNG VIỆT":"Tăng cường Tiếng Việt","TC TOÁN":"Tăng cường Toán","CÔNG NGHỆ":"Công nghệ","TH CHD":"Tăng cường","ĐS THƯ VIỆN":"Đọc sách thư viện"};
 const normS=x=>String(x==null?"":x).normalize("NFC").trim().toUpperCase().replace(/\s+/g," ");
 const subjName=k=>SUBJ_NAME[normS(k)]||capFirst(String(k).trim().toLocaleLowerCase("vi"));
 function planCfg(){if(!S.planCfg)S.planCfg={title:"Kế hoạch học tập",prepSubs:CONFIG.prepSubs.slice(),checkSubs:CONFIG.checkSubs.slice(),prepPrefix:Object.assign({},CONFIG.prepPrefix),chips:CONFIG.planChips.slice(),trackSubs:CONFIG.trackSubs.slice()};return S.planCfg}
 function parseLBG(wb){
   const rows=n=>XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:""});
-  const tkbName=wb.SheetNames.find(n=>/TH[ỜO]I\s*KH[ÓO]A\s*BI[ỂE]U|^TKB/i.test(n.normalize("NFC").trim()));
+  const nm=n=>n.normalize("NFC").trim();
+  const tkbName=wb.SheetNames.find(n=>/TH[ỜO]I\s*KH[ÓO]A\s*BI[ỂE]U|^TKB/i.test(nm(n)));
   if(!tkbName)throw new Error("Không thấy trang “THỜI KHÓA BIỂU” trong file.");
-  const T=rows(tkbName);let h=-1,cD,cP,cM,cK;
-  for(let r=0;r<Math.min(12,T.length);r++){const row=T[r].map(normS);const iD=row.indexOf("THỨ"),iP=row.indexOf("TIẾT"),iM=row.indexOf("MÔN"),iK=row.findIndex(x=>/^TIẾT THỨ/.test(x));
-    if(iD>=0&&iP>=0&&iM>=0){h=r;cD=iD;cP=iP;cM=iM;cK=iK>=0?iK:iM+2;break}}
+  const T=rows(tkbName);let h=-1,cD,cP,cM,cK=-1,cL=-1;
+  for(let r=0;r<Math.min(15,T.length);r++){const row=T[r].map(normS);const iD=row.findIndex(x=>x==="THỨ"||x==="THỨ/NGÀY"),iP=row.findIndex(x=>x==="TIẾT"||x==="TIẾT THEO TKB"),iM=row.findIndex(x=>/^MÔN/.test(x));
+    if(iD>=0&&iP>=0&&iM>=0){h=r;cD=iD;cP=iP;cM=iM;cK=row.findIndex(x=>/^TIẾT THỨ|^SỐ THỨ TỰ TIẾT|^STT TIẾT/.test(x));cL=row.findIndex(x=>x==="LỚP");break}}
   if(h<0)throw new Error("Không đọc được bảng thời khóa biểu (cần các cột Thứ, Tiết, Môn).");
-  const tkb=[];let day=0,sess="S",last=0;
+  if(cK<0&&T.slice(h+1,h+12).some(r=>Number(r[cM+2])>0))cK=cM+2;
+  const tkb=[];let day=0,sess="S",last=0;const cnt={};
   for(let r=h+1;r<T.length;r++){const row=T[r];const m=normS(row[cD]).match(/([2-7])/);if(m){day=+m[1];sess="S";last=0}
     const per=Number(row[cP]);if(!day||!per)continue;if(per<=last)sess="C";last=per;
-    const sub=normS(row[cM]),k=Number(row[cK]);if(sub&&k)tkb.push({day,sess,per,sub,k})}
+    const sub=normS(row[cM]);if(!sub||sub==="0")continue;
+    cnt[sub]=(cnt[sub]||0)+1;const k=cK>=0&&Number(row[cK])>0?Number(row[cK]):cnt[sub];
+    tkb.push({day,sess,per,sub,k})}
   if(!tkb.length)throw new Error("Thời khóa biểu trong file đang trống.");
   const subs=new Set(tkb.map(x=>x.sub));let best=null;
-  wb.SheetNames.filter(n=>/^PPCT/i.test(n.trim())).forEach(n=>{let hit=0;const map={};
-    rows(n).forEach(row=>{const sub=normS(row[2]),w=Number(row[3]),k=Number(row[4]),name=String(row[6]==null?"":row[6]).replace(/\s+/g," ").trim();
+  const cands=wb.SheetNames.filter(n=>/^PPCT|PH[ÂA]N\s*PH[ỐO]I/i.test(nm(n)));
+  cands.forEach(n=>{let hit=0;const map={};const R=rows(n);
+    let cS=2,cW=3,cKk=4,cN=6;
+    for(let r=0;r<Math.min(10,R.length);r++){const row=R[r].map(normS);const iW=row.findIndex(x=>x==="TUẦN"),iS=row.findIndex(x=>/PHÂN MÔN|^MÔN/.test(x)),iK=row.findIndex(x=>/^SỐ THỨ TỰ|^TIẾT THỨ|^STT TIẾT/.test(x)),iN=row.findIndex(x=>/TÊN BÀI/.test(x));
+      if(iW>=0&&iS>=0&&iK>=0&&iN>=0){cS=iS;cW=iW;cKk=iK;cN=iN;break}}
+    R.forEach(row=>{const sub=normS(row[cS]),w=Number(row[cW]),k=Number(row[cKk]);const raw=row[cN];const name=(raw==null||raw===0||raw==="0")?"":String(raw).replace(/\s+/g," ").trim();
       if(sub&&w&&k&&name){map[w+"|"+sub+"|"+k]=name;if(subs.has(sub))hit++}});
     if(!best||hit>best.hit)best={n,hit,map}});
-  if(!best||!best.hit)throw new Error("Không thấy trang PPCT khớp với thời khóa biểu.");
-  return {tkb,ppct:best.map,sheet:best.n.trim()};
+  if(!best||!best.hit)throw new Error("Không thấy trang phân phối chương trình (PPCT) khớp với thời khóa biểu.");
+  // ngày Thứ Hai tuần 1 (trang LỊCH TUẦN nếu có)
+  let week1=null;const lt=wb.SheetNames.find(n=>/L[ỊI]CH\s*TU[ẦA]N/i.test(nm(n)));
+  if(lt){const R=rows(lt);for(const row of R){for(let c=0;c+1<row.length;c++){if(Number(row[c])===1&&String(row[c]).trim()==="1"){const v=row[c+1];let d=null;
+      if(typeof v==="number"&&v>40000&&v<60000){d=new Date(Math.round((v-25569)*864e5));}
+      if(d&&!isNaN(d)){week1=d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");break}}}if(week1)break}}
+  return {tkb,ppct:best.map,sheet:best.n.trim(),week1d:week1};
 }
 function weekOf(k){if(!S.lbg)return null;return Math.floor(daysBetween(S.lbg.week1,fromKey(k))/7)+1}
 function lessonsOn(k){if(!S.lbg)return [];const d=fromKey(k),dow=d.getDay();if(dow===0||dow===6)return [];const w=weekOf(k);
@@ -1091,7 +1104,7 @@ Chỉ trả về đoạn gợi ý, không chào hỏi, không markdown.`;
   const w1=$("#plW1");if(w1)w1.onchange=e=>{if(e.target.value){S.lbg.week1=e.target.value;delete S.dayPlans[k];save();rPlan()}};
   $("#plFile").onchange=e=>{const f=e.target.files[0];if(!f)return;if(!window.XLSX){$("#plFM").textContent="Cần có mạng Internet để đọc file Excel. Kiểm tra mạng rồi mở lại sổ.";return}
     const r=new FileReader();r.onload=()=>{try{const wb=XLSX.read(new Uint8Array(r.result),{type:"array"});const L=parseLBG(wb);
-      L.file=f.name;L.week1=S.lbg?S.lbg.week1:CONFIG.week1;S.lbg=L;Object.keys(S.dayPlans).forEach(x=>{const d=S.dayPlans[x];if(d.auto||(!String(d.prep||"").trim()&&!String(d.check||"").trim()))delete S.dayPlans[x]});
+      L.file=f.name;L.week1=L.week1d||(S.lbg?S.lbg.week1:CONFIG.week1);delete L.week1d;S.lbg=L;Object.keys(S.dayPlans).forEach(x=>{const d=S.dayPlans[x];if(d.auto||(!String(d.prep||"").trim()&&!String(d.check||"").trim()))delete S.dayPlans[x]});
       const cur=S.dayPlans[k];const manual=cur&&!cur.auto;save();rPlan();const nT=lessonsOn(k).length,nN=lessonsOn(nextSchoolDay(k)).length;
       $("#plFM").innerHTML='<span class="pos">Đã nạp lịch báo giảng: '+L.tkb.length+' tiết mỗi tuần. Ngày '+fmtD(fromKey(k))+' là tuần '+weekOf(k)+', có '+nT+' tiết; ngày học tiếp theo có '+nN+' tiết.</span>'+(manual?' Kế hoạch ngày này cô đã gõ tay nên sổ giữ nguyên; bấm “Điền lại từ lịch báo giảng” nếu muốn lấy bài tự động.':'')+(nT+nN===0?' <span class="neg">Không thấy bài học: cô kiểm tra ô “Thứ Hai của tuần 1”.</span>':'')}
       catch(err){$("#plFM").textContent="Không đọc được file: "+err.message}};r.readAsArrayBuffer(f)};
